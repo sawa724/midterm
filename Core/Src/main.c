@@ -25,9 +25,20 @@
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
+
 /* USER CODE BEGIN PTD */
 
+/* 定義洗衣機的四種運作狀態 */
+typedef enum
+{
+    IDLE = 0,  // 空閒：綠燈亮
+    WASHING,   // 洗衣中：黃燈亮
+    WAITING,   // 洗衣完成待取：藍色呼吸燈
+    OVERDUE    // 取衣逾時：紅燈亮
+} WasherState;
+
 /* USER CODE END PTD */
+
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
