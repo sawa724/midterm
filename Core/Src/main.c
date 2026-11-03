@@ -93,9 +93,22 @@ int main(void)
   MX_GPIO_Init();
   MX_LPUART1_UART_Init();
   MX_TIM4_Init();
+
   /* USER CODE BEGIN 2 */
 
+  /* 開機初始化：洗衣機處於 IDLE 空閒狀態 */
+
+  /* PB0：開啟綠色 LED */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
+
+  /* PB1：關閉黃色 LED */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
+
+  /* PB10：關閉紅色 LED */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET);
+
   /* USER CODE END 2 */
+
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
