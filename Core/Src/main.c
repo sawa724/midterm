@@ -2,147 +2,62 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
+  * @brief          : 共享洗衣設備狀態追蹤與逾時管理系統 (PC13 PullDown 最終完整版)
   ******************************************************************************
   */
 /* USER CODE END Header */
+
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
-
-/* 提供 strcmp()，用來比較兩個字串 */
 #include <string.h>
-
-/* USER CODE END Includes */
+#include <stdio.h>
+#include <stdlib.h>
 
 /* Private typedef -----------------------------------------------------------*/
-
 /* USER CODE BEGIN PTD */
+typedef enum {
+    STATE_IDLE = 0,     // 閒置 (綠燈)
+    STATE_WASHING,      // 洗衣中 (黃燈)
+    STATE_DONE,         // 完成/待取衣 (PB6 / TIM4_CH1 藍色 PWM 呼吸燈)
+    STATE_OVERDUE       // 逾時未取 (紅燈)
+} SystemState_t;
 
-/* 每位使用者 ID 的儲存空間，包含字串結尾 */
-#define USER_ID_LENGTH 20U
-
-/* 定義洗衣機的四種運作狀態 */
-typedef enum
-{
-    IDLE = 0,  // 空閒：綠燈亮
-    WASHING,   // 洗衣中：黃燈亮
-    WAITING,   // 洗衣完成待取：藍色呼吸燈
-    OVERDUE    // 取衣逾時：紅燈亮
-} WasherState;
-
-/* 定義單一使用者的資料結構 */
-typedef struct
-{
-    /* 使用者 ID，例如 USER01 */
-    char id[USER_ID_LENGTH];
-
-    /* 帳號限制狀態：0 = 正常，1 = 限制 */
-    uint8_t banned;
-
-} User;
-
+typedef struct {
+    char id[8];
+    int is_restricted;  // 1 代表逾時遭限制，0 代表正常
+} User_t;
 /* USER CODE END PTD */
-
-
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
-
-/* UART 接收環形緩衝區的容量：128 Bytes */
-#define UART_RX_BUFFER_SIZE 128U
-
-/* UART 單行指令最大緩衝容量（包含結尾 '\0'） */
-#define UART_CMD_BUFFER_SIZE 64U
-
-/* 系統最多管理 10 位使用者 */
-#define MAX_USERS 10U
-
-
-
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
-/* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 UART_HandleTypeDef hlpuart1;
-
 TIM_HandleTypeDef htim4;
 
-
 /* USER CODE BEGIN PV */
+uint8_t rx_byte;
+char rx_buffer[32];
+uint8_t rx_index = 0;
 
-/* 記錄洗衣機目前的狀態，開機預設為 IDLE */
-WasherState washerState = IDLE;
+volatile SystemState_t current_state = STATE_IDLE;
+char current_user[8] = "NONE";
 
-/* 記錄上一次更新呼吸燈的時間 */
-uint32_t lastBreathTick = 0;
+// EXTI 按鈕觸發旗標 (volatile 確保中斷與主迴圈同步)
+volatile uint8_t button_pressed_flag = 0;
 
-/* PWM 目前的比較值，初始為 0 */
-uint16_t breathDuty = 0;
+User_t users[3] = {
+    {"U01", 0},
+    {"U02", 0},
+    {"U03", 0}
+};
 
-/* 呼吸燈變化方向：1 變亮，-1 變暗 */
-int8_t breathDirection = 1;
+uint32_t wash_duration_ms = 15000;   // 洗衣時間 15 秒 (測試用)
+uint32_t overdue_limit_ms = 10000;    // 逾時限制 10 秒 (測試用)
+uint32_t timer_start_tick = 0;
 
-/* UART 接收到的單一字元 */
-uint8_t uartRxByte = 0;
-
-
-
-/* ================= UART Ring Buffer ================= */
-
-/* 建立 128 Bytes 的 UART 接收緩衝陣列 */
-uint8_t rxBuffer[UART_RX_BUFFER_SIZE] = {0};
-
-/* Head：下一筆 UART 資料要寫入的位置 */
-volatile uint16_t rxHead = 0;
-
-/* Tail：主程式下一筆資料要讀取的位置 */
-volatile uint16_t rxTail = 0;
-
-/* ==================================================== */
-
-/* ================= UART 指令緩衝區 ================= */
-
-/* 儲存使用者輸入的一整行指令 */
-char uartCmdBuffer[UART_CMD_BUFFER_SIZE] = {0};
-
-/* 目前已接收的指令字元數量 */
-uint16_t uartCmdIndex = 0;
-
-/* ================================================= */
-
-
-/* ================= 使用者管理 ================= */
-
-/* 儲存最多 10 位使用者的資料 */
-User users[MAX_USERS] = {0};
-
-/* 目前已建立的使用者數量 */
-uint8_t userCount = 0;
-
-/* 目前登入的使用者索引 */
-/* -1 代表目前沒有任何使用者登入 */
-int8_t currentUserIndex = -1;
-
-/* ============================================== */
-
+// 呼吸燈控制變數
+uint32_t last_breath_tick = 0;
+int16_t breath_duty = 0;
+int8_t breath_step = 25;
 /* USER CODE END PV */
-
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
@@ -178,11 +93,173 @@ int8_t FindUser(const char *id);
 int8_t AddUser(const char *id);
 
 /* USER CODE END PFP */
-
+/* USER CODE BEGIN PFP */
+void UART_SendString(const char *str);
+void Process_Command(char *cmd);
+void Update_LEDs(SystemState_t state);
+void Update_Breathing_LEDs(void);
+int Find_User(const char *id);
+/* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+void UART_SendString(const char *str) {
+    HAL_UART_Transmit(&hlpuart1, (uint8_t*)str, strlen(str), HAL_MAX_DELAY);
+}
+
+int Find_User(const char *id) {
+    for (int i = 0; i < 3; i++) {
+        if (strcmp(users[i].id, id) == 0) return i;
+    }
+    return -1;
+}
+
+void Update_LEDs(SystemState_t state) {
+    // 關閉所有一般 LED
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);  // 綠 (IDLE)
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);  // 黃 (WASHING)
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET); // 紅 (OVERDUE)
+
+    // 先停止 TIM4 PWM
+    HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_1);
+    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, 0);
+
+    switch (state) {
+        case STATE_IDLE:
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
+            break;
+        case STATE_WASHING:
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+            break;
+        case STATE_DONE:
+            breath_duty = 0;
+            breath_step = 25;
+            last_breath_tick = HAL_GetTick();
+
+            __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, 0);
+
+            if (HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1) != HAL_OK)
+            {
+                UART_SendString("[ERROR] PWM start failed!\r\n");
+            }
+            else
+            {
+                UART_SendString("[OK] Blue breathing mode started.\r\n");
+            }
+            break;
+        case STATE_OVERDUE:
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_SET);
+            break;
+    }
+}
+
+void Update_Breathing_LEDs(void)
+{
+    if (current_state != STATE_DONE)
+    {
+        return;
+    }
+
+    uint32_t now = HAL_GetTick();
+
+    if ((now - last_breath_tick) >= 10)
+    {
+        last_breath_tick = now;
+
+        breath_duty += breath_step;
+
+        if (breath_duty >= 999)
+        {
+            breath_duty = 999;
+            breath_step = -25;
+        }
+        else if (breath_duty <= 0)
+        {
+            breath_duty = 0;
+            breath_step = 25;
+        }
+
+        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, breath_duty);
+    }
+}
+
+void Process_Command(char *cmd) {
+    cmd[strcspn(cmd, "\r\n")] = 0;
+    if (strlen(cmd) == 0) return;
+
+    char response[64];
+
+    if (strncmp(cmd, "USER ", 5) == 0) {
+        char *id = cmd + 5;
+        int idx = Find_User(id);
+        if (idx != -1) {
+            strcpy(current_user, id);
+            snprintf(response, sizeof(response), "[OK] User %s authenticated. Restricted: %s\r\n",
+                     current_user, users[idx].is_restricted ? "YES" : "NO");
+            UART_SendString(response);
+        } else {
+            UART_SendString("[ERROR] User not found (Use U01, U02, U03).\r\n");
+        }
+    }
+    else if (strcmp(cmd, "CLOSE") == 0) {
+        if (strcmp(current_user, "NONE") == 0) {
+            UART_SendString("[ERROR] Please authenticate first using 'USER <ID>'.\r\n");
+            return;
+        }
+        int idx = Find_User(current_user);
+        if (idx != -1 && users[idx].is_restricted) {
+            UART_SendString("[ERROR] Access Denied! You are restricted due to previous overdue violation.\r\n");
+            return;
+        }
+
+        if (current_state == STATE_IDLE) {
+            current_state = STATE_WASHING;
+            timer_start_tick = HAL_GetTick();
+            Update_LEDs(current_state);
+            snprintf(response, sizeof(response), "[OK] Washing started for %s (15s).\r\n", current_user);
+            UART_SendString(response);
+        } else {
+            UART_SendString("[ERROR] Device is busy.\r\n");
+        }
+    }
+    else if (strcmp(cmd, "TAKE") == 0) {
+        if (current_state == STATE_WASHING) {
+            current_state = STATE_IDLE;
+            Update_LEDs(current_state);
+            snprintf(response, sizeof(response), "[INFO] Washing cancelled by user %s. Reset to IDLE.\r\n", current_user);
+            UART_SendString(response);
+            strcpy(current_user, "NONE");
+        }
+        else if (current_state == STATE_DONE || current_state == STATE_OVERDUE) {
+            snprintf(response, sizeof(response), "[INFO] User %s took clothes. Reset to IDLE.\r\n", current_user);
+            UART_SendString(response);
+            current_state = STATE_IDLE;
+            strcpy(current_user, "NONE");
+            Update_LEDs(current_state);
+        } else {
+            UART_SendString("[WARN] Cannot take clothes in current state.\r\n");
+        }
+    }
+    else if (strncmp(cmd, "UNLOCK ", 7) == 0) {
+        char *id = cmd + 7;
+        int idx = Find_User(id);
+        if (idx != -1) {
+            users[idx].is_restricted = 0;
+            snprintf(response, sizeof(response), "[OK] User %s restriction removed.\r\n", id);
+            UART_SendString(response);
+        } else {
+            UART_SendString("[ERROR] User not found.\r\n");
+        }
+    }
+    else if (strcmp(cmd, "STATUS") == 0) {
+        snprintf(response, sizeof(response), "[STATUS] State: %d, User: %s\r\n", current_state, current_user);
+        UART_SendString(response);
+    }
+    else {
+        UART_SendString("[ERROR] Unknown command.\r\n");
+    }
+}
 /* USER CODE END 0 */
 
 /**
