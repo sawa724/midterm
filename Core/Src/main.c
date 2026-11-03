@@ -59,7 +59,16 @@ TIM_HandleTypeDef htim4;
 /* USER CODE BEGIN PV */
 
 /* 記錄洗衣機目前的狀態，開機預設為 IDLE */
-WasherState washerState = IDLE;
+WasherState washerState = WAITING;
+
+/* 記錄上一次更新呼吸燈的時間 */
+uint32_t lastBreathTick = 0;
+
+/* PWM 目前的比較值，初始為 0 */
+uint16_t breathDuty = 0;
+
+/* 呼吸燈變化方向：1 變亮，-1 變暗 */
+int8_t breathDirection = 1;
 
 /* USER CODE END PV */
 
@@ -74,6 +83,9 @@ static void MX_TIM4_Init(void);
 
 /* 宣告 LED 狀態更新函式 */
 void Update_LED(void);
+
+/* 宣告非阻塞 PWM 呼吸燈更新函式 */
+void Update_Breathing_LED(void);
 
 /* USER CODE END PFP */
 
@@ -133,6 +145,10 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+	  /* 非阻塞更新藍色呼吸燈 */
+	  Update_Breathing_LED();
+
   }
   /* USER CODE END 3 */
 }
@@ -352,12 +368,20 @@ void Update_LED(void)
             HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
             break;
 
+
         case WAITING:
-            /* 完成待取：啟動藍色 LED PWM */
-            /* 暫時使用固定約 50% 亮度，之後改成呼吸燈 */
-            __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, 500);
+            /* 進入等待取衣狀態，重設呼吸燈 */
+            breathDuty = 0;
+            breathDirection = 1;
+            lastBreathTick = HAL_GetTick();
+
+            /* PWM 從 0% 亮度開始 */
+            __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, 0);
+
+            /* 啟動 TIM4_CH1 PWM */
             HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
             break;
+
 
         case OVERDUE:
             /* 取衣逾時：亮紅燈 PB10 */
@@ -369,6 +393,59 @@ void Update_LED(void)
             washerState = IDLE;
             HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
             break;
+    }
+}
+
+/* 非阻塞式藍色 PWM 呼吸燈 */
+void Update_Breathing_LED(void)
+{
+    /* 只有 WAITING 狀態才更新呼吸燈 */
+    if (washerState != WAITING)
+    {
+        return;
+    }
+
+    /* 取得目前系統運作時間，單位 ms */
+    uint32_t now = HAL_GetTick();
+
+    /* 每經過 10 ms，才改變一次亮度 */
+    if ((uint32_t)(now - lastBreathTick) >= 10U)
+    {
+        /* 記錄本次更新時間 */
+        lastBreathTick = now;
+
+        /* 根據方向增加或減少 PWM 數值 */
+        if (breathDirection == 1)
+        {
+            /* 逐漸變亮 */
+            if (breathDuty < 990)
+            {
+                breathDuty += 10;
+            }
+            else
+            {
+                breathDuty = 999;
+                breathDirection = -1;
+            }
+        }
+        else
+        {
+            /* 逐漸變暗 */
+            if (breathDuty >= 10)
+            {
+                breathDuty -= 10;
+            }
+            else
+            {
+                breathDuty = 0;
+                breathDirection = 1;
+            }
+        }
+
+        /* 更新 TIM4 Channel 1 的 PWM 比較值 */
+        __HAL_TIM_SET_COMPARE(&htim4,
+                              TIM_CHANNEL_1,
+                              breathDuty);
     }
 }
 
