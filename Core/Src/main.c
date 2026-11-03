@@ -43,6 +43,12 @@ typedef enum
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
+/* UART 接收環形緩衝區的容量：128 Bytes */
+#define UART_RX_BUFFER_SIZE 128U
+
+/* UART 單行指令最大緩衝容量（包含結尾 '\0'） */
+#define UART_CMD_BUFFER_SIZE 64U
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -73,8 +79,31 @@ int8_t breathDirection = 1;
 /* UART 接收到的單一字元 */
 uint8_t uartRxByte = 0;
 
-/* UART 接收完成旗標：0 = 尚未收到，1 = 已收到 */
-volatile uint8_t uartRxReady = 0;
+
+
+/* ================= UART Ring Buffer ================= */
+
+/* 建立 128 Bytes 的 UART 接收緩衝陣列 */
+uint8_t rxBuffer[UART_RX_BUFFER_SIZE] = {0};
+
+/* Head：下一筆 UART 資料要寫入的位置 */
+volatile uint16_t rxHead = 0;
+
+/* Tail：主程式下一筆資料要讀取的位置 */
+volatile uint16_t rxTail = 0;
+
+/* ==================================================== */
+
+/* ================= UART 指令緩衝區 ================= */
+
+/* 儲存使用者輸入的一整行指令 */
+char uartCmdBuffer[UART_CMD_BUFFER_SIZE] = {0};
+
+/* 目前已接收的指令字元數量 */
+uint16_t uartCmdIndex = 0;
+
+/* ================================================= */
+
 
 /* USER CODE END PV */
 
@@ -95,6 +124,15 @@ void Update_Breathing_LED(void);
 
 /* 宣告 UART 文字傳送函式 */
 void UART_SendText(const char *text);
+
+/* 將一個字元寫入 Ring Buffer */
+uint8_t RingBuffer_Put(uint8_t data);
+
+/* 從 Ring Buffer 取出一個字元 */
+uint8_t RingBuffer_Get(uint8_t *data);
+
+/* 將 UART 收到的字元組合成完整指令 */
+void UART_ProcessByte(uint8_t data);
 
 /* USER CODE END PFP */
 
@@ -167,33 +205,22 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-	  /* 非阻塞更新藍色呼吸燈 */
+	  /* 非阻塞更新藍色 PWM 呼吸燈 */
 	  Update_Breathing_LED();
 
-	  /* 檢查 UART 是否收到一個字元 */
-	  if (uartRxReady == 1)
+	  /* 建立變數，存放 Ring Buffer 取出的字元 */
+	  uint8_t receivedChar;
+
+
+	  /* 持續從 Ring Buffer 取出 UART 字元 */
+	  while (RingBuffer_Get(&receivedChar) == 1)
 	  {
-	      /* 清除接收完成旗標 */
-	      uartRxReady = 0;
-
-	      /* 將收到的字元回傳至 Tera Term */
-	      UART_SendText("\r\nRX: ");
-
-	      HAL_UART_Transmit(
-	          &hlpuart1,
-	          &uartRxByte,
-	          1,
-	          1000
-	      );
-
-	      UART_SendText("\r\n");
-
-	      /* 重新啟動下一個字元的中斷接收 */
-	      HAL_UART_Receive_IT(&hlpuart1, &uartRxByte, 1);
+	      /* 將字元交給完整指令處理函式 */
+	      UART_ProcessByte(receivedChar);
 	  }
 
-  }
   /* USER CODE END 3 */
+}
 }
 
 /**
@@ -519,16 +546,115 @@ void UART_SendText(const char *text)
 }
 
 /* UART 接收完成中斷回呼函式 */
+
+/* UART 接收完成中斷回呼函式 */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    /* 確認本次中斷來自 LPUART1 */
+    /* 確認中斷來自 LPUART1 */
     if (huart->Instance == LPUART1)
     {
-        /* 通知主程式：已經收到一個字元 */
-        uartRxReady = 1;
+        /* 將接收到的字元存入 Ring Buffer */
+        RingBuffer_Put(uartRxByte);
+
+        /* 立即重新啟動下一個字元的 UART 中斷接收 */
+        HAL_UART_Receive_IT(&hlpuart1, &uartRxByte, 1);
     }
 }
 
+/* 將一個 UART 字元存入 Ring Buffer */
+uint8_t RingBuffer_Put(uint8_t data)
+{
+    /* 計算下一個寫入位置 */
+    uint16_t nextHead =
+        (rxHead + 1U) % UART_RX_BUFFER_SIZE;
+
+    /* 如果下一個位置等於 Tail，表示 Buffer 已滿 */
+    if (nextHead == rxTail)
+    {
+        /* 緩衝區已滿，不覆蓋尚未讀取的資料 */
+        return 0;
+    }
+
+    /* 將收到的字元存入目前 Head 位置 */
+    rxBuffer[rxHead] = data;
+
+    /* 更新 Head，指向下一個可寫入位置 */
+    rxHead = nextHead;
+
+    /* 回傳 1，表示寫入成功 */
+    return 1;
+}
+
+
+/* 從 UART Ring Buffer 取出一個字元 */
+uint8_t RingBuffer_Get(uint8_t *data)
+{
+    /* 確認資料指標有效 */
+    if (data == NULL)
+    {
+        return 0;
+    }
+
+    /* Head 等於 Tail，代表緩衝區沒有資料 */
+    if (rxHead == rxTail)
+    {
+        return 0;
+    }
+
+    /* 讀取目前 Tail 指向的字元 */
+    *data = rxBuffer[rxTail];
+
+    /* 更新 Tail，並在到達尾端時回到 0 */
+    rxTail = (rxTail + 1U) % UART_RX_BUFFER_SIZE;
+
+    /* 回傳 1，表示成功讀取 */
+    return 1;
+}
+
+/* 處理 UART 接收到的單一字元 */
+void UART_ProcessByte(uint8_t data)
+{
+    /* 判斷是否收到 Enter（CR 或 LF） */
+    if (data == '\r' || data == '\n')
+    {
+        /* 如果目前沒有輸入任何字元，就忽略 */
+        if (uartCmdIndex == 0)
+        {
+            return;
+        }
+
+        /* 在字串結尾加入 '\0' */
+        uartCmdBuffer[uartCmdIndex] = '\0';
+
+        /* 回傳完整指令到 Tera Term */
+        UART_SendText("\r\nCommand received: ");
+        UART_SendText(uartCmdBuffer);
+        UART_SendText("\r\n");
+
+        /* 清空指令長度，準備接收下一行 */
+        uartCmdIndex = 0;
+    }
+    else
+    {
+        /* 檢查是否還有空間存放字元 */
+        if (uartCmdIndex < UART_CMD_BUFFER_SIZE - 1U)
+        {
+            /* 將字元存入指令緩衝區 */
+            uartCmdBuffer[uartCmdIndex] = (char)data;
+
+            /* 更新已接收字元數量 */
+            uartCmdIndex++;
+        }
+        else
+        {
+            /* 指令過長，顯示錯誤並清空 */
+            UART_SendText("\r\nError: Command too long.\r\n");
+
+            /* 重設指令位置 */
+            uartCmdIndex = 0;
+        }
+    }
+}
 
 /* USER CODE END 4 */
 
