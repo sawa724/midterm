@@ -22,11 +22,17 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+/* 提供 strcmp()，用來比較兩個字串 */
+#include <string.h>
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 
 /* USER CODE BEGIN PTD */
+
+/* 每位使用者 ID 的儲存空間，包含字串結尾 */
+#define USER_ID_LENGTH 20U
 
 /* 定義洗衣機的四種運作狀態 */
 typedef enum
@@ -63,8 +69,7 @@ typedef struct
 /* 系統最多管理 10 位使用者 */
 #define MAX_USERS 10U
 
-/* 每位使用者 ID 的儲存空間，包含字串結尾 */
-#define USER_ID_LENGTH 20U
+
 
 /* USER CODE END PD */
 
@@ -164,6 +169,13 @@ uint8_t RingBuffer_Get(uint8_t *data);
 
 /* 將 UART 收到的字元組合成完整指令 */
 void UART_ProcessByte(uint8_t data);
+
+/* 根據使用者 ID 查詢使用者陣列索引 */
+int8_t FindUser(const char *id);
+
+/* 新增使用者，並回傳使用者陣列索引 */
+/* 成功回傳 0~9，失敗回傳 -1 */
+int8_t AddUser(const char *id);
 
 /* USER CODE END PFP */
 
@@ -685,6 +697,79 @@ void UART_ProcessByte(uint8_t data)
             uartCmdIndex = 0;
         }
     }
+}
+
+/* 根據 ID 查詢使用者是否存在 */
+int8_t FindUser(const char *id)
+{
+    /* 如果傳入的指標無效，回傳找不到 */
+    if (id == NULL)
+    {
+        return -1;
+    }
+
+    /* 從第一位使用者開始搜尋 */
+    for (uint8_t i = 0; i < userCount; i++)
+    {
+        /* 比較目前使用者的 ID 是否相同 */
+        if (strcmp(users[i].id, id) == 0)
+        {
+            /* 找到使用者，回傳陣列索引 */
+            return (int8_t)i;
+        }
+    }
+
+    /* 全部搜尋完畢，仍然找不到 */
+    return -1;
+}
+
+/* 新增使用者帳號 */
+int8_t AddUser(const char *id)
+{
+    /* 先確認 ID 指標是否有效 */
+    if (id == NULL)
+    {
+        return -1;
+    }
+
+    /* 計算使用者 ID 的字串長度 */
+    size_t idLength = strlen(id);
+
+    /* 不允許空白 ID 或超過儲存容量的 ID */
+    if (idLength == 0U || idLength >= USER_ID_LENGTH)
+    {
+        return -1;
+    }
+
+    /* 檢查使用者是否已經存在 */
+    int8_t existingIndex = FindUser(id);
+
+    /* 如果使用者已存在，直接回傳原本的索引 */
+    if (existingIndex >= 0)
+    {
+        return existingIndex;
+    }
+
+    /* 檢查使用者數量是否已達上限 */
+    if (userCount >= MAX_USERS)
+    {
+        return -1;
+    }
+
+    /* 記錄新使用者要存放的陣列位置 */
+    uint8_t newIndex = userCount;
+
+    /* 將使用者 ID 複製到使用者資料結構 */
+    strcpy(users[newIndex].id, id);
+
+    /* 新建立的使用者預設沒有受到限制 */
+    users[newIndex].banned = 0;
+
+    /* 更新已建立的使用者數量 */
+    userCount++;
+
+    /* 回傳新使用者的陣列索引 */
+    return (int8_t)newIndex;
 }
 
 /* USER CODE END 4 */
