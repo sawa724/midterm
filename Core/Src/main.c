@@ -59,7 +59,7 @@ TIM_HandleTypeDef htim4;
 /* USER CODE BEGIN PV */
 
 /* 記錄洗衣機目前的狀態，開機預設為 IDLE */
-WasherState washerState = WAITING;
+WasherState washerState = IDLE;
 
 /* 記錄上一次更新呼吸燈的時間 */
 uint32_t lastBreathTick = 0;
@@ -69,6 +69,12 @@ uint16_t breathDuty = 0;
 
 /* 呼吸燈變化方向：1 變亮，-1 變暗 */
 int8_t breathDirection = 1;
+
+/* UART 接收到的單一字元 */
+uint8_t uartRxByte = 0;
+
+/* UART 接收完成旗標：0 = 尚未收到，1 = 已收到 */
+volatile uint8_t uartRxReady = 0;
 
 /* USER CODE END PV */
 
@@ -146,6 +152,9 @@ int main(void)
   UART_SendText("Current State: IDLE\r\n");
   UART_SendText("Please enter user ID.\r\n");
 
+  /* 啟動 LPUART1 中斷接收，每次接收 1 個字元 */
+  HAL_UART_Receive_IT(&hlpuart1, &uartRxByte, 1);
+
   /* USER CODE END 2 */
 
 
@@ -160,6 +169,28 @@ int main(void)
 
 	  /* 非阻塞更新藍色呼吸燈 */
 	  Update_Breathing_LED();
+
+	  /* 檢查 UART 是否收到一個字元 */
+	  if (uartRxReady == 1)
+	  {
+	      /* 清除接收完成旗標 */
+	      uartRxReady = 0;
+
+	      /* 將收到的字元回傳至 Tera Term */
+	      UART_SendText("\r\nRX: ");
+
+	      HAL_UART_Transmit(
+	          &hlpuart1,
+	          &uartRxByte,
+	          1,
+	          1000
+	      );
+
+	      UART_SendText("\r\n");
+
+	      /* 重新啟動下一個字元的中斷接收 */
+	      HAL_UART_Receive_IT(&hlpuart1, &uartRxByte, 1);
+	  }
 
   }
   /* USER CODE END 3 */
@@ -485,6 +516,17 @@ void UART_SendText(const char *text)
         length,              // 傳送字元數量
         1000                 // 最長等待 1000 ms
     );
+}
+
+/* UART 接收完成中斷回呼函式 */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    /* 確認本次中斷來自 LPUART1 */
+    if (huart->Instance == LPUART1)
+    {
+        /* 通知主程式：已經收到一個字元 */
+        uartRxReady = 1;
+    }
 }
 
 
