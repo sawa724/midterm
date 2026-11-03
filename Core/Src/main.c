@@ -87,6 +87,9 @@ void Update_LED(void);
 /* 宣告非阻塞 PWM 呼吸燈更新函式 */
 void Update_Breathing_LED(void);
 
+/* 宣告 UART 文字傳送函式 */
+void UART_SendText(const char *text);
+
 /* USER CODE END PFP */
 
 
@@ -133,6 +136,15 @@ int main(void)
   /* 開機時依照 washerState 更新 LED */
   /* washerState 初始值為 IDLE，因此應亮綠燈 */
   Update_LED();
+
+  /* 傳送系統啟動訊息到 Tera Term */
+  UART_SendText("\r\n");
+  UART_SendText("================================\r\n");
+  UART_SendText(" Smart Laundry Management System\r\n");
+  UART_SendText("================================\r\n");
+  UART_SendText("System initialized.\r\n");
+  UART_SendText("Current State: IDLE\r\n");
+  UART_SendText("Please enter user ID.\r\n");
 
   /* USER CODE END 2 */
 
@@ -448,6 +460,33 @@ void Update_Breathing_LED(void)
                               breathDuty);
     }
 }
+
+/* 使用 LPUART1 傳送文字到 Tera Term */
+void UART_SendText(const char *text)
+{
+    /* 確認傳入的文字指標有效 */
+    if (text == NULL)
+    {
+        return;
+    }
+
+    /* 計算字串長度，不包含結尾的 '\0' */
+    uint16_t length = 0;
+
+    while (text[length] != '\0')
+    {
+        length++;
+    }
+
+    /* 透過 LPUART1 傳送字串 */
+    HAL_UART_Transmit(
+        &hlpuart1,           // LPUART1 控制結構
+        (uint8_t *)text,     // 要傳送的文字
+        length,              // 傳送字元數量
+        1000                 // 最長等待 1000 ms
+    );
+}
+
 
 /* USER CODE END 4 */
 
