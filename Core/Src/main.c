@@ -37,6 +37,17 @@ typedef enum
     OVERDUE    // 取衣逾時：紅燈亮
 } WasherState;
 
+/* 定義單一使用者的資料結構 */
+typedef struct
+{
+    /* 使用者 ID，例如 USER01 */
+    char id[USER_ID_LENGTH];
+
+    /* 帳號限制狀態：0 = 正常，1 = 限制 */
+    uint8_t banned;
+
+} User;
+
 /* USER CODE END PTD */
 
 
@@ -48,6 +59,12 @@ typedef enum
 
 /* UART 單行指令最大緩衝容量（包含結尾 '\0'） */
 #define UART_CMD_BUFFER_SIZE 64U
+
+/* 系統最多管理 10 位使用者 */
+#define MAX_USERS 10U
+
+/* 每位使用者 ID 的儲存空間，包含字串結尾 */
+#define USER_ID_LENGTH 20U
 
 /* USER CODE END PD */
 
@@ -104,6 +121,20 @@ uint16_t uartCmdIndex = 0;
 
 /* ================================================= */
 
+
+/* ================= 使用者管理 ================= */
+
+/* 儲存最多 10 位使用者的資料 */
+User users[MAX_USERS] = {0};
+
+/* 目前已建立的使用者數量 */
+uint8_t userCount = 0;
+
+/* 目前登入的使用者索引 */
+/* -1 代表目前沒有任何使用者登入 */
+int8_t currentUserIndex = -1;
+
+/* ============================================== */
 
 /* USER CODE END PV */
 
