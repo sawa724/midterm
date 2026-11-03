@@ -55,18 +55,28 @@ UART_HandleTypeDef hlpuart1;
 
 TIM_HandleTypeDef htim4;
 
+
 /* USER CODE BEGIN PV */
 
+/* 記錄洗衣機目前的狀態，開機預設為 IDLE */
+WasherState washerState = IDLE;
+
 /* USER CODE END PV */
+
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_LPUART1_UART_Init(void);
 static void MX_TIM4_Init(void);
+
 /* USER CODE BEGIN PFP */
 
+/* 宣告 LED 狀態更新函式 */
+void Update_LED(void);
+
 /* USER CODE END PFP */
+
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
@@ -105,20 +115,15 @@ int main(void)
   MX_LPUART1_UART_Init();
   MX_TIM4_Init();
 
+
   /* USER CODE BEGIN 2 */
 
-  /* 開機初始化：洗衣機處於 IDLE 空閒狀態 */
-
-  /* PB0：開啟綠色 LED */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
-
-  /* PB1：關閉黃色 LED */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
-
-  /* PB10：關閉紅色 LED */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET);
+  /* 開機時依照 washerState 更新 LED */
+  /* washerState 初始值為 IDLE，因此應亮綠燈 */
+  Update_LED();
 
   /* USER CODE END 2 */
+
 
 
   /* Infinite loop */
@@ -320,9 +325,55 @@ static void MX_GPIO_Init(void)
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
+
 /* USER CODE BEGIN 4 */
 
+/* 根據洗衣機目前的狀態，更新 LED 顯示 */
+void Update_LED(void)
+{
+    /* 先關閉全部 GPIO 狀態燈，避免多個燈同時亮 */
+    HAL_GPIO_WritePin(GPIOB,
+                      GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_10,
+                      GPIO_PIN_RESET);
+
+    /* 先停止藍色 LED 的 PWM 輸出 */
+    HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_1);
+
+    /* 根據 washerState 決定要顯示的燈號 */
+    switch (washerState)
+    {
+        case IDLE:
+            /* 空閒：亮綠燈 PB0 */
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
+            break;
+
+        case WASHING:
+            /* 洗衣中：亮黃燈 PB1 */
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+            break;
+
+        case WAITING:
+            /* 完成待取：啟動藍色 LED PWM */
+            /* 暫時使用固定約 50% 亮度，之後改成呼吸燈 */
+            __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, 500);
+            HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
+            break;
+
+        case OVERDUE:
+            /* 取衣逾時：亮紅燈 PB10 */
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_SET);
+            break;
+
+        default:
+            /* 異常狀態：恢復為空閒 */
+            washerState = IDLE;
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
+            break;
+    }
+}
+
 /* USER CODE END 4 */
+
 
 /**
   * @brief  This function is executed in case of error occurrence.
