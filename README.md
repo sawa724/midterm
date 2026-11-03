@@ -49,6 +49,7 @@ STM32 NUCLEO-G474RE 微算機期中專題
 8. HAL_GetTick()：進行洗衣與逾時計時。
 9. C 語言結構：管理使用者及系統狀態。
 
+
 ## 5. 腳位表
 
 | 腳位 | 元件 | 功能 |
@@ -122,23 +123,49 @@ STM32 NUCLEO-G474RE 微算機期中專題
 
 ### 開發板與接線
 
-![開發板與接線](docs/board.jpg)
+![開發板與接線](docs/全景.jpg)
 
-### Tera Term 操作畫面
+### UART 終端機畫面
 
-![Tera Term 操作畫面](docs/teraterm.jpg)
+**正常操作流程**
 
-### LED 狀態展示
+![UART 正常流程](docs/UART正常流程.png)
 
-![LED 狀態](docs/led_states.jpg)
+**逾時取衣與使用者限制**
 
-### PWM 呼吸燈
+![UART 逾時取衣](docs/UART中途取衣.png)
 
-![PWM 呼吸燈](docs/pwm_blue.jpg)
+![逾時限制與解封](docs/超時取衣，限制用戶並解封.png)
 
-### 逾時限制測試
+### 燈號
 
-![逾時限制測試](docs/overdue.jpg)
+**綠燈：洗衣機閒置**
+
+![綠燈](docs/洗衣機空閒綠燈亮.jpg)
+
+**黃燈：洗衣中**
+
+![黃燈](docs/洗衣中黃燈亮.jpg)
+
+**藍燈：洗衣完成，PWM 呼吸燈**
+
+![藍燈漸亮](docs/洗衣完成呼吸燈變亮.jpg)
+
+![藍燈漸暗](docs/洗衣完成呼吸燈變暗.jpg)
+
+**紅燈：逾時未取衣**
+
+![紅燈](docs/逾時取衣紅燈亮.jpg)
+
+### 腳位特寫
+
+**PB0 腳位**
+
+![PB0 腳位特寫](docs/PB0腳位特寫.jpg)
+
+**PB1、PB10、PB6 腳位**
+
+![PB1 PB10 PB6 腳位特寫](docs/PB1、PB10、PB6腳位特寫.jpg))
 
 以上圖片需放入 `docs` 資料夾，檔名與副檔名必須一致。
 
